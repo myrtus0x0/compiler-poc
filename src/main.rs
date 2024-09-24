@@ -15,6 +15,7 @@ struct TokenMatcher {
     token_id: Option<TokenIdentifier>,
 }
 
+#[derive(Clone, Debug)]
 enum TokenIdentifier {
     Identifier(String),
     Constant(String),
@@ -24,6 +25,7 @@ enum TokenIdentifier {
     BraceOpen,
     BraceClose,
     Semicolon,
+    Comment,
 }
 
 fn parse_args(arguments: Vec<String>) -> Result<Command, String> {
@@ -39,15 +41,16 @@ fn parse_args(arguments: Vec<String>) -> Result<Command, String> {
     Err(String::from("no valid option found"))
 }
 
-fn lex(src_code_contents: &str, grammer: Vec<TokenMatcher>) -> Option<String> {
+fn lex(src_code_contents: &str, grammer: Vec<TokenMatcher>) -> Option<Vec<TokenIdentifier>> {
     let mut copied_src = src_code_contents.to_string().clone();
-    let mut tokens: Vec<&TokenIdentifier> = Vec::new();
+    let mut tokens: Vec<TokenIdentifier> = Vec::new();
 
     loop {
         // remove whitespace at start of string and copy it so we own it
         copied_src = copied_src.clone().trim_start().to_string();
         if copied_src.len() == 0 {
-            return Some("".to_string());
+            // if we've read all the source then return the tokens we've collected
+            return Some(tokens);
         }
 
         // keep track of finding a match
@@ -64,18 +67,20 @@ fn lex(src_code_contents: &str, grammer: Vec<TokenMatcher>) -> Option<String> {
                         let matched_text_token = matched_token.get(0).unwrap().as_str();
 
                         copied_src = copied_src[matched_text_token.len()..].to_string();
-                        println!("Matched: {:?}", matched_text_token);
 
                         // push token with value, otherwise it doesnt need value
-                        // TODO: explore whether this is something that can be combined
-                        // TODO: replace the hardcoded strings with proper names
-                        if matcher.name == "Keyword"
-                            || matcher.name == "Constant"
-                            || matcher.name == "Identifier"
-                        {
-                            tokens.push(&matcher.token_id(matched_text_token));
+                        if matcher.name == "Keyword" {
+                            tokens.push(TokenIdentifier::Keyword(matched_text_token.to_string()));
+                        } else if matcher.name == "Constant" {
+                            tokens.push(TokenIdentifier::Constant(matched_text_token.to_string()));
+                        } else if matcher.name == "Identifier" {
+                            tokens
+                                .push(TokenIdentifier::Identifier(matched_text_token.to_string()));
                         } else {
-                            tokens.push(&matcher.token_id);
+                            match &matcher.token_id {
+                                Some(token_id) => tokens.push(token_id.clone()),
+                                _ => {}
+                            }
                         }
                         found_match = true;
                         break;
@@ -86,12 +91,10 @@ fn lex(src_code_contents: &str, grammer: Vec<TokenMatcher>) -> Option<String> {
 
         // if we didnt find a match then our input src data is most likely flawed
         if !found_match {
-            println!("no match found");
-            break;
+            println!("no match found: \"{}\"", copied_src);
+            std::process::exit(1);
         }
     }
-
-    None
 }
 
 fn parse(src_code_contents: &str) -> Option<String> {
@@ -149,21 +152,39 @@ fn init_grammer() -> Vec<TokenMatcher> {
             patterns: vec![Regex::new(r"^;").unwrap()],
             token_id: Some(TokenIdentifier::Semicolon),
         },
+        // edgecase to deal with comments for the time being
+        // TODO: remove me, but need a better solution to support comments
+        // maybe a find replace of everything within the regex of a comment..?
+        //
+        TokenMatcher {
+            name: String::from("Comment"),
+            patterns: vec![Regex::new(r"\/\/.*").unwrap()],
+            token_id: Some(TokenIdentifier::Comment),
+        },
     ];
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
+    if args.len() < 3 {
+        println!("this program requires at least two arguments: ./compiler [file-path] [<args>]");
+        std::process::exit(1);
+    }
+
     let src_file = args.get(1).unwrap();
     let src_code_contents = fs::read_to_string(src_file).unwrap();
-
     let grammer = init_grammer();
 
+    let tokens = lex(&src_code_contents, grammer).unwrap();
+    for tok in tokens {
+        dbg!(tok);
+    }
+
     let command = parse_args(args[2..].to_vec()).unwrap();
-    match command {
-        Command::Lex => lex(&src_code_contents, grammer),
-        Command::Parse => parse(&src_code_contents),
-        Command::Codegen => code_gen(&src_code_contents),
-    };
+    //     match command {
+    //         Command::Lex => lex(&src_code_contents, grammer),
+    //         Command::Parse => parse(&src_code_contents),
+    //     Command::Codegen => code_gen(&src_code_contents),
+    //     };
 }
